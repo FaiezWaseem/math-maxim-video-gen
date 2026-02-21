@@ -1,44 +1,44 @@
-import { ChatOpenAI } from '@langchain/openai';
-import { StructuredOutputParser } from 'langchain/output_parsers';
-import { PromptTemplate } from '@langchain/core/prompts';
-import { z } from 'zod';
+import OpenAI from 'openai';
 import { appConfig } from '../config/index.js';
-import { ManimCode } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Creates the Manim code generator agent
  */
 export function createManimAgent() {
-   const model = new ChatOpenAI({
-    modelName: appConfig.openaiModel,
-    openAIApiKey: appConfig.openaiApiKey,
-    temperature: 0.7,
-    configuration: {
-      baseURL: appConfig.openaiBaseURL || "https://llm.chutes.ai/v1",
-    },
-
+  const client = new OpenAI({
+    apiKey: appConfig.openaiApiKey,
+    baseURL: appConfig.openaiBaseURL || "https://llm.chutes.ai/v1",
   });
-  const parser = StructuredOutputParser.fromZodSchema(
-    z.object({
-      code: z.string().describe('Complete Manim code for the chapter'),
-    })
-  );
 
-  const formatInstructions = parser.getFormatInstructions();
+  const tools = [
+    {
+      type: 'function' as const,
+      function: {
+        name: 'generate_manim_code',
+        description: 'Generate Manim code for a chapter',
+        parameters: {
+          type: 'object',
+          properties: {
+            code: {
+              type: 'string',
+              description: 'Complete Manim code for the chapter',
+            },
+          },
+          required: ['code'],
+        },
+      },
+    },
+  ];
 
-  const systemPrompt = `
-    You are a Manim code generator. Your job is to create Manim code for a single chapter of a video, given a detailed explanation of the chapter's content and how it should be visualized.
-    The code should be complete and runnable. Include all necessary imports. The code should create a single scene. Add comments to explain the code.
-    Do not include any comments that are not valid Python comments. Ensure the code is runnable. Do not include any text outside of the code block.
-    
-    {format_instructions}
-  `;
+  const systemPrompt = `You are a Manim code generator. Your job is to create Manim code for a single chapter of a video, given a detailed explanation of the chapter's content and how it should be visualized.
+The code should be complete and runnable. Include all necessary imports. The code should create a single scene. Add comments to explain the code.
+Do not include any comments that are not valid Python comments. Ensure the code is runnable.`;
 
   return {
-    model,
-    parser,
+    client,
+    tools,
     systemPrompt,
-    formatInstructions,
   };
 }
 
@@ -49,16 +49,32 @@ export function createManimAgent() {
  * @returns The generated Manim code
  */
 export async function generateManimCode(chapterTitle: string, explanation: string): Promise<string> {
-  const { model, parser, systemPrompt, formatInstructions } = createManimAgent();
+  const { client, tools, systemPrompt } = createManimAgent();
 
-  const prompt = PromptTemplate.fromTemplate(systemPrompt);
-  const chain = prompt.pipe(model).pipe(parser);
-
-  const result = await chain.invoke({
-    chapterTitle,
-    explanation,
-    format_instructions: formatInstructions,
+  const response = await client.chat.completions.create({
+    model: appConfig.openaiModel,
+    messages: [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
+      {
+        role: 'user',
+        content: `Generate Manim code for the following chapter.\n\nChapter Title: ${chapterTitle}\n\nExplanation:\n${explanation}`,
+      },
+    ],
+    tools,
+    tool_choice: { type: 'function', function: { name: 'generate_manim_code' } },
+    temperature: 0.7,
   });
+
+  const toolCall = response.choices[0].message.tool_calls?.[0];
+  if (!toolCall || toolCall.type !== 'function') {
+    throw new Error('Failed to get function call response from OpenAI');
+  }
+
+  const result = JSON.parse(toolCall.function.arguments);
+  logger.debug(`Generated Manim code for chapter "${chapterTitle}":\n${result.code}`);
 
   return result.code;
 }

@@ -23,6 +23,7 @@ async function generateChapterVideo(
   let videoFile: string | null = null;
 
   logger.info(`Processing chapter ${chapterIndex + 1}: ${chapter.title}`);
+  logger.debug(`Chapter explanation: ${chapter.explanation}`);
 
   while (attempts <= maxRetries && !videoFile) {
     try {
