@@ -35,6 +35,10 @@ export function validateConfig(): void {
   if (!appConfig.openaiApiKey) {
     throw new Error('OPENAI_API_KEY is required. Please create a .env file with your OpenAI API key.');
   }
+    if (!appConfig.openaiBaseURL) {
+    throw new Error('OPENAI_BASE_URL is required. Please create a .env file with your OpenAI API base URL.');
+  }
+  console.debug('Configuration validated successfully');
 }
 
 // Validate configuration on import
